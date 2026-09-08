@@ -1,4 +1,4 @@
-# Min / Max
+# Workout Tracker
 
 **A focused workout journal. Plan your session, record each set, and see your progress.**
 
