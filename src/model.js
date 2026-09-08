@@ -8,6 +8,22 @@ export function getWorkout(program,week,day,split){
  const w=get(day);return {...w,custom:true,exercises:w.exercises.filter(e=>day==='Upper'?!e.name.startsWith('S1:'):day==='Pull'?e.name!=='Preacher Hammer Curl':true)};
 }
 export const daysFor=split=>split===5?['Upper','Lower','Push','Pull','Arms']:['Upper','Lower','Push','Pull'];
+/** The PDF is organised as two six-week blocks. Returns null for weeks outside it. */
+export const blockForWeek=week=>Number.isInteger(week)&&week>=1&&week<=12?Math.ceil(week/6):null;
+export const weeksForBlock=block=>block===1?[1,2,3,4,5,6]:block===2?[7,8,9,10,11,12]:[];
+export function sessionCompletion(session){
+ const sets=Object.values(session?.exercises||{}).flatMap(e=>Object.values(e.sets||{}));
+ return {finished:!!session?.finished,completedSets:sets.filter(set=>set.done).length,totalSets:sets.length};
+}
+/** A small, UI-agnostic attendance summary for a week, block, or the full program. */
+export function attendanceSummary(state,split=state.settings.split,{week,block}={}){
+ const weeks=week&&blockForWeek(week)?[week]:block?weeksForBlock(block):Array.from({length:12},(_,i)=>i+1);
+ const scheduledSessions=weeks.length*daysFor(split).length;
+ const sessions=Object.entries(state.sessions||{}).filter(([id,session])=>id.startsWith(`${split}-`)&&weeks.includes(session.week));
+ const completedSessions=sessions.filter(([,session])=>session.finished).length;
+ const completedSets=sessions.reduce((total,[,session])=>total+sessionCompletion(session).completedSets,0);
+ return {weeks,scheduledSessions,completedSessions,remainingSessions:scheduledSessions-completedSessions,completedSets};
+}
 export function suggestedWorkout(state){for(let week=1;week<=12;week++)for(const day of daysFor(state.settings.split))if(!state.sessions[sessionKey(state.settings.split,week,day)]?.finished)return {week,day};return {week:12,day:daysFor(state.settings.split).at(-1)};}
 export const cleanName=name=>name.replace(/^S\d+:\s*/,'');
 export function historyFor(state,name,exclude){
@@ -19,11 +35,13 @@ export function historyFor(state,name,exclude){
 }
 export function previousSets(state,name,exclude,prescription){const h=historyFor(state,name,exclude).filter(s=>!prescription||!s.prescription||s.prescription===prescription);const latest=h.at(-1);return latest?h.filter(s=>s.sessionId===latest.sessionId):[];}
 export function isPR(history,weightKg,reps){if(!history.length)return false;return history.some(s=>weightKg>=s.weightKg&&reps>=s.reps&&(weightKg>s.weightKg||reps>s.reps))&&!history.some(s=>s.weightKg>=weightKg&&s.reps>=reps);}
+export const exerciseUnit=(state,name)=>Object.hasOwn(state.exerciseUnits||{},name)?state.exerciseUnits[name]:state.settings.unit;
 export const toKg=(value,unit)=>unit==='lb'?value/2.2046226218:value;
 export const fromKg=(value,unit)=>Math.round((unit==='lb'?value*2.2046226218:value)*100)/100;
 export function validSet(weight,reps,rir){return weight!==''&&Number.isFinite(Number(weight))&&Number(weight)>=-500&&Number(weight)<=2000&&Number.isInteger(Number(reps))&&Number(reps)>=1&&Number(reps)<=200&&Number.isInteger(Number(rir))&&Number(rir)>=0&&Number(rir)<=5;}
 export function validateBackup(data){
  if(data?.version!==1||![4,5].includes(data.settings?.split)||!['kg','lb'].includes(data.settings?.unit)||!Number.isInteger(data.settings?.rest)||data.settings.rest<30||data.settings.rest>600||!data.sessions||typeof data.sessions!=='object'||Array.isArray(data.sessions)||!data.substitutions||typeof data.substitutions!=='object')return false;
+ if(data.exerciseUnits!==undefined&&(!data.exerciseUnits||typeof data.exerciseUnits!=='object'||Array.isArray(data.exerciseUnits)||!Object.entries(data.exerciseUnits).every(([name,unit])=>name.length>0&&name.length<300&&['kg','lb'].includes(unit))))return false;
  if(!Object.entries(data.substitutions).every(([k,v])=>typeof v==='string'&&v.length<300))return false;
  for(const [key,s]of Object.entries(data.sessions)){
   if(!/^[45]-([1-9]|1[012])-(Upper|Lower|Push|Pull|Arms)$/.test(key)||!s||!Number.isInteger(s.week)||s.week<1||s.week>12||!daysFor(5).includes(s.day)||typeof s.date!=='string'||!s.exercises||typeof s.exercises!=='object')return false;
